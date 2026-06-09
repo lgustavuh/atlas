@@ -34,7 +34,7 @@ FROM php:8.3-fpm-alpine
 RUN apk add --no-cache \
         bash curl git icu-dev libpng-dev libjpeg-turbo-dev libwebp-dev \
         freetype-dev libzip-dev oniguruma-dev postgresql-dev \
-        nginx supervisor \
+        nginx netcat-openbsd \
         $PHPIZE_DEPS \
     && docker-php-ext-configure gd \
         --with-freetype --with-jpeg --with-webp \
@@ -68,7 +68,6 @@ COPY docker/php/www.conf /usr/local/etc/php-fpm.d/www.conf
 COPY docker/production/nginx.conf /etc/nginx/nginx.conf
 
 # Supervisor: orquestra nginx + php-fpm no mesmo container
-COPY docker/production/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
 # Script de entrypoint: roda migrations + cache + starta supervisord
 COPY docker/production/entrypoint.sh /usr/local/bin/entrypoint.sh
