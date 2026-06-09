@@ -1,0 +1,80 @@
+# ===================================================================
+#   Atlas - Dockerfile de Producao
+#   Single-container: nginx + PHP-FPM + supervisord
+#   Otimizado para Railway/Fly.io/Render.
+# ===================================================================
+
+# --- Stage 1: build de dependencias PHP (composer) ---
+FROM composer:2.7 AS composer-build
+WORKDIR /app
+COPY composer.json composer.lock ./
+COPY database/ database/
+# Otimiza autoload e ja preenche o cache do composer
+RUN composer install \
+    --no-dev \
+    --no-scripts \
+    --no-autoloader \
+    --no-interaction \
+    --prefer-dist
+
+# --- Stage 2: build de assets JS/CSS (Vite) ---
+FROM node:20-alpine AS node-build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY vite.config.js tailwind.config.js postcss.config.js* ./
+COPY resources/ resources/
+RUN npm run build
+
+# --- Stage 3: runtime final ---
+FROM php:8.3-fpm-alpine
+
+# Dependencias do sistema + nginx + supervisor
+RUN apk add --no-cache \
+        bash curl git icu-dev libpng-dev libjpeg-turbo-dev libwebp-dev \
+        freetype-dev libzip-dev oniguruma-dev postgresql-dev \
+        nginx supervisor \
+        $PHPIZE_DEPS \
+    && docker-php-ext-configure gd \
+        --with-freetype --with-jpeg --with-webp \
+    && docker-php-ext-install -j"$(nproc)" \
+        pdo pdo_pgsql pgsql mbstring intl gd zip bcmath exif opcache \
+    && apk del $PHPIZE_DEPS \
+    && rm -rf /var/cache/apk/* /tmp/*
+
+# Composer e codigo da aplicacao
+COPY --from=composer:2.7 /usr/bin/composer /usr/bin/composer
+WORKDIR /var/www
+
+# Copia vendor pre-compilado, depois o resto, e por ultimo gera autoload otimizado
+COPY --from=composer-build /app/vendor /var/www/vendor
+COPY . /var/www
+COPY --from=node-build /app/public/build /var/www/public/build
+
+# Permissoes do diretorio de runtime (storage + bootstrap/cache)
+RUN composer dump-autoload --optimize --no-dev --no-scripts \
+    && mkdir -p storage/framework/{cache,sessions,views,testing} \
+        storage/logs storage/app/private bootstrap/cache \
+    && chown -R www-data:www-data storage bootstrap/cache public/build \
+    && chmod -R 775 storage bootstrap/cache
+
+# Config do PHP (OPcache otimizado + JIT)
+COPY docker/php/php.ini /usr/local/etc/php/conf.d/zzz-custom.ini
+# PHP-FPM pool config (workers dinamicos)
+COPY docker/php/www.conf /usr/local/etc/php-fpm.d/www.conf
+
+# Nginx (config single-process pra producao em container)
+COPY docker/production/nginx.conf /etc/nginx/nginx.conf
+
+# Supervisor: orquestra nginx + php-fpm no mesmo container
+COPY docker/production/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+
+# Script de entrypoint: roda migrations + cache + starta supervisord
+COPY docker/production/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Railway injeta a porta na variavel PORT (default 8080 se rodar local)
+ENV PORT=8080
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

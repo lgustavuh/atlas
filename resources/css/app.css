@@ -1,0 +1,37 @@
+/* Imports devem vir ANTES de @tailwind para o PostCSS processar corretamente */
+@import '@tabler/icons-webfont/dist/tabler-icons.min.css';
+@import url('https://fonts.bunny.net/css?family=figtree:400,500,600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Customizações globais */
+@layer base {
+    body {
+        @apply font-sans antialiased text-gray-900;
+    }
+}
+
+/* Componentes utilitários */
+@layer components {
+    .btn-primary {
+        @apply px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50;
+    }
+
+    .btn-secondary {
+        @apply px-4 py-2 bg-white text-gray-700 text-sm font-medium border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500;
+    }
+
+    .btn-danger {
+        @apply px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-md shadow-sm hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500;
+    }
+
+    .input-field {
+        @apply mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm;
+    }
+
+    .label-field {
+        @apply block text-sm font-medium text-gray-700;
+    }
+}
