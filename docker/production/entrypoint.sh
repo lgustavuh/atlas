@@ -1,7 +1,7 @@
 #!/bin/sh
 # ===================================================================
 #   Atlas - Entrypoint do container de producao
-#   Ordem: migrations -> seed -> caches -> nginx (PID 1)
+#   Ordem: migrations -> seed -> caches -> chown -> nginx (PID 1)
 # ===================================================================
 
 set -e
@@ -22,19 +22,21 @@ fi
 
 cd /var/www
 
-# 3. Migrations PRIMEIRO (cria tabelas cache/sessions/jobs)
+# 3. Migrations (so se DB_RUN_MIGRATIONS=true)
 if [ "${DB_RUN_MIGRATIONS:-true}" = "true" ]; then
     echo "==> Rodando migrations..."
     php artisan migrate --force --no-interaction
 fi
 
-# 4. Seed inicial (somente se SEED_DATABASE=true)
+# 4. Seed inicial (so se SEED_DATABASE=true)
+# O '|| true' garante que o script continua mesmo se algum seeder falhar
+# (ex: tentar inserir dado ja existente apos um deploy anterior)
 if [ "${SEED_DATABASE:-false}" = "true" ]; then
     echo "==> Rodando seeders..."
-    php artisan db:seed --force --no-interaction || echo "==> AVISO: seed parcial"
+    php artisan db:seed --force --no-interaction || echo "==> AVISO: seed parcial (dados podem ja existir)"
 fi
 
-# 5. Caches Laravel - DEPOIS das tabelas existirem
+# 5. Caches Laravel
 echo "==> Limpando caches antigos..."
 php artisan config:clear || true
 php artisan route:clear || true
@@ -47,15 +49,23 @@ php artisan route:cache
 php artisan view:cache
 php artisan event:cache
 
-# 6. Validar nginx config antes de iniciar
+# 6. CRITICO: ajustar permissoes do storage/cache
+# O entrypoint roda como root, mas o php-fpm roda como www-data.
+# Sem esse chown, php-fpm nao consegue escrever caches novos em runtime
+# (sintoma: rota /up retorna 500 com "Permission denied" em storage/framework/views).
+echo "==> Ajustando permissoes do storage e bootstrap/cache..."
+chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache
+chmod -R 775 /var/www/storage /var/www/bootstrap/cache
+
+# 7. Validar config do nginx
 echo "==> Validando configuracao do nginx..."
 nginx -t
 
-# 7. Subir php-fpm em background
+# 8. php-fpm em background
 echo "==> Iniciando php-fpm em background..."
 php-fpm --daemonize
 
-# Aguarda php-fpm aceitar conexoes (max 10s)
+# Aguarda php-fpm aceitar conexoes
 for i in 1 2 3 4 5 6 7 8 9 10; do
     if nc -z 127.0.0.1 9000 2>/dev/null; then
         echo "==> php-fpm pronto (porta 9000)"
@@ -64,6 +74,6 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
     sleep 1
 done
 
-# 8. Nginx em foreground como PID 1
+# 9. Nginx em foreground como PID 1
 echo "==> Atlas online em :$PORT - iniciando nginx (PID 1)"
 exec nginx -g 'daemon off;'
